@@ -173,7 +173,7 @@ class TestQdrantAdapter:
             mock_result = MagicMock()
             mock_result.score = 0.95
             mock_result.payload = {"chunk_id": "abc", "content": "hello"}
-            mock_instance.search.return_value = [mock_result]
+            mock_instance.query_points.return_value = MagicMock(points=[mock_result])
 
             from src.vector.qdrant_client import QdrantAdapter
 
