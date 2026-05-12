@@ -1,0 +1,77 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+*.whl
+.eggs/
+
+# ── uv / virtual environments ────────────────────────────────────────────────
+.venv/
+.venv*/
+venv/
+env/
+# Keep uv.lock tracked (reproducible builds); ignore the cache dir
+.uv/
+
+# ── Type checking ─────────────────────────────────────────────────────────────
+.mypy_cache/
+.pytype/
+.pyre/
+.ruff_cache/
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.lcov
+
+# ── MkDocs ────────────────────────────────────────────────────────────────────
+site/
+
+# ── Docker / infra ────────────────────────────────────────────────────────────
+# Ignore local volume data directories (Qdrant, embedding service)
+docker/volumes/
+data/
+qdrant_storage/
+
+# ── Secrets and local config ──────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# ── IDEs and editors ──────────────────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+
+# ── OS artifacts ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.bak
+*.swp
+*.tmp
+.DS_Store
