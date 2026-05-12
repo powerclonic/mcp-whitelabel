@@ -1,0 +1,36 @@
+services:
+  server:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.example
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      embeddings:
+        condition: service_started
+    environment:
+      QDRANT_HOST: qdrant
+      EMBEDDING_URL: http://embeddings:8001/embed
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.6
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    command: --model-id BAAI/bge-m3 --port 8001
+    ports:
+      - "8001:8001"
+
+volumes:
+  qdrant_storage:
