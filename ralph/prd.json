@@ -1,0 +1,346 @@
+{
+  "project": "mcp-poc",
+  "branchName": "ralph/mcp-governance-server",
+  "description": "Internal MCP HTTP server in Python for AI governance — Q&A, compliance tools, multi-source ingestion, vector search, and OIDC auth.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Bootstrap project with uv and module structure",
+      "description": "As a platform engineer, I want the project bootstrapped with uv so that dependencies and the module layout are reproducible from day one.",
+      "acceptanceCriteria": [
+        "`pyproject.toml` declares Python 3.12+, all direct deps via `uv add`, and `uv.lock` is committed",
+        "Source tree has `src/server/`, `src/domain/`, `src/adapters/`, `src/vector/`, `src/catalog/`, `src/config/` as empty packages",
+        "`src/config/settings.py` loads env vars via pydantic-settings with a working `.env.example`",
+        "`make install` runs `uv sync` cleanly",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add FastMCP HTTP server with /health endpoint",
+      "description": "As a platform engineer, I want a running FastMCP HTTP server so that agents have a stable MCP endpoint to connect to.",
+      "acceptanceCriteria": [
+        "`src/server/app.py` creates a FastMCP app with HTTP transport",
+        "GET `/health` returns `{\"status\": \"ok\", \"version\": \"<app_version>\"}` with HTTP 200",
+        "`main.py` starts the server via `uvicorn` using settings from config",
+        "`make dev` starts the server and `curl http://localhost:8000/health` returns 200",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add Dockerfile and Docker Compose for server and Qdrant",
+      "description": "As a platform engineer, I want Docker Compose to start the full stack so that local setup requires only one command.",
+      "acceptanceCriteria": [
+        "`Dockerfile` builds the Python server image with `uv` and installs from lockfile",
+        "`docker-compose.yml` defines services: `server`, `qdrant`, and `embeddings` (placeholder image)",
+        "`docker compose up` starts all three services without errors",
+        "Server health endpoint is reachable from host after compose up",
+        "`.gitignore` excludes `qdrant_storage/`, `data/`, and other volume paths",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Add catalog data models for libraries and versions",
+      "description": "As a maintainer, I want typed data models for approved libraries and versions so that compliance tools have a structured source of truth.",
+      "acceptanceCriteria": [
+        "`src/catalog/models.py` defines `LibraryEntry` with fields: `name`, `version`, `status` (`approved`|`restricted`|`forbidden`), `reason`, `effective_date`, `updated_by`",
+        "Status field is a `Literal` or `Enum` — no free-form strings",
+        "Models are pydantic `BaseModel` subclasses",
+        "Unit tests cover model validation for each status value",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Add catalog data models for code standards and guidelines",
+      "description": "As a maintainer, I want data models for coding standards so that Q&A and compliance tools reference a structured policy object.",
+      "acceptanceCriteria": [
+        "`src/catalog/models.py` adds `StandardEntry` with fields: `id`, `domain`, `title`, `description`, `policy_version`, `effective_date`, `updated_by`",
+        "`CatalogRepository` interface in `src/catalog/repository.py` exposes `get_library(name, version)` and `get_standard(id)` returning `Optional[T]`",
+        "Unit tests cover repository lookups returning `None` for unknown entries",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add Qdrant client adapter with upsert and search",
+      "description": "As a platform engineer, I want a Qdrant adapter so that ingestion and retrieval use a single, testable interface.",
+      "acceptanceCriteria": [
+        "`src/vector/qdrant_client.py` wraps `qdrant-client` with `upsert_chunks(collection, chunks)` and `search(collection, vector, filters, top_k)` methods",
+        "Collection is created automatically if it does not exist, using the configured vector size",
+        "Each chunk payload includes: `chunk_id`, `origin`, `source_type`, `version_ref`, `timestamp`, `domain`",
+        "Adapter is configurable via settings (host, port, collection name)",
+        "Unit tests mock the Qdrant client and verify upsert and search calls",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Add embedding service client for self-hosted model",
+      "description": "As a platform engineer, I want an HTTP client for the self-hosted embedding service so that all embedding calls are routed through a versioned, swappable interface.",
+      "acceptanceCriteria": [
+        "`src/vector/embedding_client.py` exposes `embed(texts: list[str]) -> list[list[float]]` calling the configured self-hosted endpoint",
+        "Model name and endpoint URL come from settings; model name is stored in chunk metadata on every upsert",
+        "Client raises a typed `EmbeddingError` on non-200 responses",
+        "Unit tests mock HTTP calls and verify metadata is populated",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Add chunking strategies per source type",
+      "description": "As a platform engineer, I want configurable chunking so that different source formats produce quality chunks with consistent metadata.",
+      "acceptanceCriteria": [
+        "`src/vector/chunking.py` exposes `chunk_markdown(text, metadata)`, `chunk_text(text, metadata)` functions returning `list[Chunk]`",
+        "`Chunk` dataclass has: `chunk_id` (deterministic hash of content), `content`, `metadata`",
+        "Markdown chunker preserves section hierarchy in metadata (heading path)",
+        "Max chunk size and overlap are configurable via settings",
+        "Unit tests verify chunk count, `chunk_id` determinism, and metadata fields",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Add Markdown ingestion adapter",
+      "description": "As a maintainer, I want to ingest Markdown files so that internal docs and standards written in Markdown are searchable.",
+      "acceptanceCriteria": [
+        "`src/adapters/markdown_adapter.py` implements `MarkdownAdapter` with `ingest(path, metadata) -> list[Chunk]`",
+        "Section hierarchy (h1–h3) is reflected in chunk metadata as `heading_path`",
+        "Adapter attaches `origin`, `source_type='markdown'`, `version_ref`, `timestamp` to every chunk",
+        "Unit tests ingest a sample `.md` file and assert chunk count > 0 and metadata completeness",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Add PDF ingestion adapter",
+      "description": "As a maintainer, I want to ingest PDF files so that policy documents distributed as PDFs are indexed.",
+      "acceptanceCriteria": [
+        "`src/adapters/pdf_adapter.py` implements `PDFAdapter` with `ingest(path, metadata) -> list[Chunk]`",
+        "Text is extracted per page; page number is stored in chunk metadata",
+        "Adapter attaches `source_type='pdf'` and standard metadata fields",
+        "Unit tests ingest a small test PDF and assert text is non-empty and metadata is set",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Add Git repository ingestion adapter",
+      "description": "As a maintainer, I want to ingest documentation files from Git repositories so that repo-based standards are indexed with their commit reference.",
+      "acceptanceCriteria": [
+        "`src/adapters/git_adapter.py` implements `GitAdapter` with `ingest(repo_path, ref, glob_pattern, metadata) -> list[Chunk]`",
+        "Adapter reads matching files at the given ref and delegates chunking to `MarkdownAdapter` or `chunk_text`",
+        "`version_ref` in metadata is set to the resolved commit SHA",
+        "Unit tests use a fixture git repo and assert `version_ref` is a 40-char SHA",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Add web and Confluence export ingestion adapter",
+      "description": "As a maintainer, I want to ingest HTML/Markdown exported from web pages or Confluence so that Confluence knowledge is searchable without a live crawler.",
+      "acceptanceCriteria": [
+        "`src/adapters/web_adapter.py` implements `WebAdapter` with `ingest(path_or_url, metadata) -> list[Chunk]` supporting local HTML files and optionally fetching a URL",
+        "HTML is stripped to plain text; `source_type='web'` or `'confluence_export'` is set based on metadata hint",
+        "Unit tests ingest a local HTML fixture and assert non-empty text chunks",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Add ingestion pipeline with incremental mode",
+      "description": "As a maintainer, I want a unified ingestion pipeline so that any source type can be ingested or re-ingested with a single call that skips unchanged chunks.",
+      "acceptanceCriteria": [
+        "`src/domain/ingest_pipeline.py` exposes `IngestPipeline.run(source, metadata, incremental=True)`",
+        "Incremental mode skips chunks whose `chunk_id` already exists in Qdrant with matching content hash",
+        "Per-item errors are caught, logged with `origin` and error cause, and pipeline continues",
+        "Pipeline returns a summary: `{ingested: int, skipped: int, errors: list}`",
+        "Integration test runs the pipeline against a sample Markdown file and asserts summary fields",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Add search_governance MCP tool",
+      "description": "As an AI agent, I want a natural language Q&A tool so that I can ask about approved libraries, versions, and coding patterns and get cited answers.",
+      "acceptanceCriteria": [
+        "`search_governance(query: str, domain: str | None)` MCP tool is registered on the FastMCP app",
+        "Tool performs hybrid search on Qdrant and returns `{answer: str, cited_chunks: list[{chunk_id, origin, policy_version}], confidence: float, policy_date: str}`",
+        "When no evidence is found, returns `{found: false, message: 'insufficient evidence'}` — never hallucinates",
+        "Tool requires `query:read` scope (enforced even before auth middleware is wired — stub returns 403 if missing)",
+        "Unit tests cover found and not-found scenarios with mocked Qdrant",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Add check_library_compliance MCP tool",
+      "description": "As an AI agent, I want a library compliance tool so that I can validate whether a given package and version are approved.",
+      "acceptanceCriteria": [
+        "`check_library_compliance(name: str, version: str)` MCP tool is registered",
+        "Returns `{status: 'compliant'|'warning'|'non_compliant', justification: str, cited_chunks: list[...], policy_version: str, effective_date: str}`",
+        "Checks both catalog and vector store; catalog takes precedence",
+        "Unknown library returns `warning` with explicit message, not an error",
+        "Requires `compliance:read` scope stub",
+        "Unit tests cover compliant, warning, and non-compliant cases",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Add check_code_compliance MCP tool",
+      "description": "As an AI agent, I want a code compliance tool so that I can evaluate a code snippet against internal standards.",
+      "acceptanceCriteria": [
+        "`check_code_compliance(snippet: str, domain: str | None)` MCP tool is registered",
+        "Returns normalized `{status, justification, cited_chunks, policy_version, effective_date}`",
+        "Retrieves relevant standard chunks via semantic search on `snippet`",
+        "Requires `compliance:read` scope stub",
+        "Unit tests cover compliant and non-compliant outcomes with mocked search",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Add check_infra_compliance MCP tool",
+      "description": "As an AI agent, I want an infrastructure compliance tool so that I can validate infra definitions against declared policies.",
+      "acceptanceCriteria": [
+        "`check_infra_compliance(definition: str, type: str | None)` MCP tool is registered",
+        "Returns normalized `{status, justification, cited_chunks, policy_version, effective_date}`",
+        "Validates common infra signals: base image pinning, exposed ports, env var secrets",
+        "Requires `compliance:read` scope stub",
+        "Unit tests cover at least two violation types",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Add OIDC JWT validation middleware",
+      "description": "As a security engineer, I want JWT validation on every MCP request so that unauthenticated calls are rejected with an auditable error.",
+      "acceptanceCriteria": [
+        "`src/auth/middleware.py` validates Bearer JWT against configured OIDC issuer (`/.well-known/openid-configuration`)",
+        "Expired, invalid-signature, or missing tokens return HTTP 401 with `{error: 'unauthorized', reason: '...'}`",
+        "Valid token payload (claims + scopes) is attached to request context",
+        "JWKS are fetched and cached; cache TTL is configurable via settings",
+        "Unit tests cover valid token, expired token, and missing token scenarios using mocked JWKS",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Add RBAC scope enforcement per MCP tool",
+      "description": "As a security engineer, I want each MCP tool to enforce its required scope so that clients without permission are explicitly rejected.",
+      "acceptanceCriteria": [
+        "`src/auth/rbac.py` exposes `require_scope(scope: str)` decorator/dependency used by each MCP tool",
+        "Missing scope returns HTTP 403 with `{error: 'forbidden', required_scope: '...'}`",
+        "Scope map: `search_governance` → `query:read`; compliance tools → `compliance:read`; ingestion → `ingestion:write`",
+        "Replace scope stubs from US-014–017 with the real enforcement",
+        "Unit tests assert each tool rejects requests missing its required scope",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Document retention policy and snapshot guide",
+      "description": "As a maintainer, I want the retention policy documented so that snapshot schedules and restoration procedures are predictable.",
+      "acceptanceCriteria": [
+        "`docs/operations/retention.md` describes active-version + periodic-snapshot policy with minimum snapshot frequency",
+        "Snapshot restore procedure has numbered steps executable from the README",
+        "MkDocs `mkdocs.yml` includes the retention page in the nav",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Publish README and MkDocs documentation site",
+      "description": "As a maintainer, I want complete docs so that onboarding and operation are predictable from README + MkDocs alone.",
+      "acceptanceCriteria": [
+        "README covers: quick-start with `uv` + Docker Compose, env var reference, and links to MkDocs",
+        "MkDocs site includes: architecture overview, ingestion guide (per adapter), MCP tool reference, troubleshooting, and governance update guide",
+        "`mkdocs.yml` is configured and `mkdocs build` succeeds without warnings",
+        "`make docs` runs `mkdocs serve` locally",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
