@@ -33,7 +33,19 @@ new-ingestion:
 		$(if $(ADAPTER),--adapter $(ADAPTER)) \
 		$(if $(DOMAIN),--domain $(DOMAIN))
 
-## Run the full seed script (first-time bootstrap)
+## Run an ingestion script inside the server container (recommended for consistency).
+## Usage: make ingest SCRIPT=scripts/ingestion/seed_all.py [FORCE=1]
+## Usage: make ingest SCRIPT=scripts/ingestion/ingest_my_policy.py
+ingest:
+	@test -n "$(SCRIPT)" || (echo "Usage: make ingest SCRIPT=scripts/ingestion/<name>.py"; exit 1)
+	docker compose run --rm \
+		-v "$(PWD)/scripts:/app/scripts:ro" \
+		-v "$(PWD)/policies:/app/policies:ro" \
+		server uv run python $(SCRIPT) $(if $(FORCE),--force)
+
+## Run the full seed script inside the container (first-time bootstrap)
 ## Usage: make seed [FORCE=1]
 seed:
-	uv run python scripts/ingestion/seed_all.py $(if $(FORCE),--force)
+	docker compose run --rm \
+		-v "$(PWD)/scripts:/app/scripts:ro" \
+		server uv run python scripts/ingestion/seed_all.py $(if $(FORCE),--force)

@@ -13,7 +13,7 @@ dependencies = [
     "pydantic-settings>=2.14.1",
     "pypdf>=6.11.0",
     "python-jose[cryptography]>=3.5.0",
-    "qdrant-client[fastembed]>=1.18.0",
+    "qdrant-client[fastembed]>=1.13,<1.15",
     "uvicorn[standard]>=0.46.0",
 ]
 
