@@ -149,6 +149,33 @@ class TestChunkTextSentenceAware:
         chunks = chunk_text(text, {}, max_size=len(s1) + 5, overlap=0)
         assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
         assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
+
+    def test_unquoted_then_quoted_sentence_regression(self) -> None:
+        # Regression: unquoted sentence ending with ." (closing curly quote)
+        # followed by a capital-letter next sentence must split correctly.
+        # The width-2 lookbehind (?<=[.!?]") must fire before the width-1
+        # fallback to avoid the closing quote leaking into the next chunk.
+        s1 = "The decision was final.\u201d"   # ends with closing curly quote
+        s2 = "All teams must comply."
+        text = f"{s1} {s2}"
+        max_size = max(len(s1), len(s2)) + 5
+        chunks = chunk_text(text, {}, max_size=max_size, overlap=0)
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
+
+    def test_heading_path_not_shared_across_chunks(self) -> None:
+        # Regression: mutating heading_path on one chunk must not affect others.
+        md = "# Section\n\nFirst sentence. Second sentence. Third sentence."
+        chunks = chunk_markdown(md, {}, max_size=30, overlap=0)
+        headed = [c for c in chunks if c.metadata.get("heading_path")]
+        assert len(headed) >= 1
+        original_path = list(headed[0].metadata["heading_path"])
+        headed[0].metadata["heading_path"].append("MUTATED")
+        for other in headed[1:]:
+            assert other.metadata["heading_path"] == original_path, (
+                "heading_path list is shared across chunks"
+            )
+
     SAMPLE_MD = """# Title
 
 Intro text about the document.

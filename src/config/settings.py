@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     # ≈ 375 tokens — a sweet-spot for high-precision retrieval on governance docs.
     # Overlap is sentence-aware: whole sentences are re-included at the start of
     # each new chunk up to this character budget.
+    #
+    # MIGRATION NOTE: changing these values invalidates all previously ingested
+    # chunk IDs (content-hash based), because the same source text produces
+    # different chunk boundaries and therefore different SHA-256 digests.
+    # Existing Qdrant collections must be rebuilt (drop + re-ingest) whenever
+    # either value is changed; incremental ingest will otherwise treat every
+    # document as fully changed until orphan vectors are cleaned up.
     chunk_max_size: int = 1500
     chunk_overlap: int = 150
 

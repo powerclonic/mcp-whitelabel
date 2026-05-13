@@ -120,15 +120,17 @@ def _build_chunks(
     * Units that individually exceed *max_size* are hard-split at character
       boundaries with :func:`_char_split` as a last resort (e.g. long code
       lines, tables, or pathological inputs like repeated characters).
+
+    ``buffer_chars`` tracks ``len(" ".join(buffer))`` incrementally to avoid
+    an O(n) re-join on every unit iteration (which would give O(n²) overall
+    for paragraphs with many short sentences).
     """
     chunks: list[Chunk] = []
     buffer: list[str] = []
-
-    def _buffer_text() -> str:
-        return " ".join(buffer)
+    buffer_chars: int = 0  # tracks len(" ".join(buffer))
 
     def _flush() -> None:
-        content = _buffer_text().strip()
+        content = " ".join(buffer).strip()
         if content:
             chunks.append(
                 Chunk(
@@ -141,6 +143,12 @@ def _build_chunks(
                     },
                 )
             )
+
+    def _set_buffer(new_buffer: list[str]) -> None:
+        """Replace buffer and recompute buffer_chars from scratch."""
+        nonlocal buffer, buffer_chars
+        buffer = new_buffer
+        buffer_chars = len(" ".join(buffer))
 
     for raw_unit in units:
         unit = raw_unit.strip()
@@ -155,33 +163,36 @@ def _build_chunks(
             if buffer:
                 _flush()
                 seed = _overlap_seed(buffer, overlap)
-                buffer = []
+                _set_buffer([])
             # Combine the overlap seed with the first hard-split fragment so it
-            # is not emitted as a standalone micro-chunk.
+            # is not emitted as a standalone micro-chunk.  Cap the seed so that
+            # the combined chunk does not exceed max_size.
             first_part = True
             for raw_part in _char_split(unit, max_size, overlap):
                 part = raw_part.strip()
                 if not part:
                     continue
                 if first_part and seed:
-                    buffer = seed + [part]
+                    max_seed = max(0, max_size - len(part) - 1)
+                    capped_seed = _overlap_seed(seed, min(overlap, max_seed))
+                    _set_buffer(capped_seed + [part])
                     first_part = False
                 else:
                     if buffer:
                         _flush()
-                    buffer = [part]
+                    _set_buffer([part])
                     first_part = False
             continue
 
         # ── Adding this unit would overflow the buffer → flush first ──
-        sep = 1 if buffer else 0
-        if buffer and len(_buffer_text()) + sep + unit_len > max_size:
+        if buffer and buffer_chars + 1 + unit_len > max_size:
             _flush()
             # Bound the seed so that seed_chars + sep + unit_len <= max_size,
             # preventing the buffer from exceeding max_size after appending unit.
             max_seed = max(0, max_size - unit_len - 1)
-            buffer = _overlap_seed(buffer, min(overlap, max_seed))
+            _set_buffer(_overlap_seed(buffer, min(overlap, max_seed)))
 
+        buffer_chars += (1 if buffer else 0) + unit_len
         buffer.append(unit)
 
     if buffer:
@@ -217,11 +228,21 @@ def chunk_text(
     from the tail of the previous chunk (up to *overlap* characters) so every
     chunk starts at a sentence boundary.
 
-    The sentence boundary detector recognises upper-case ASCII and Latin-1
-    letters (covering all Portuguese accented capitals), leading digits, and
-    opening bracket/quote characters.  Sentences that start with a lowercase
-    letter are deliberately not split from the preceding sentence — this avoids
-    false breaks on abbreviations (``e.g.``, ``i.e.``) and decimal numbers.
+    The sentence boundary detector recognises:
+
+    * Upper-case ASCII and Latin-1 letters (``A–Z``, ``À–Ö``, ``Ø–Ý``),
+      covering all common Portuguese accented capitals.
+    * Leading digits (e.g. ``"2024 brought new rules."``).
+    * Opening bracket or quotation characters (``(``, ``[``, ``"``, ``'``
+      and their curly-quote Unicode variants).
+
+    **Limitation:** sentences that start with a *lowercase* letter — including
+    accented lowercase letters common in Portuguese (``à``, ``é``, ``ç``, …)
+    and quoted speech like ``"disse ele."`` — are deliberately *not* split from
+    the preceding sentence.  This avoids false breaks on abbreviations
+    (``e.g.``, ``i.e.``) and decimal numbers, but means such sentences may be
+    absorbed into the preceding sentence's chunk or fall through to the
+    character splitter for very long paragraphs.
 
     Every :class:`Chunk` receives:
 
@@ -297,7 +318,9 @@ def chunk_markdown(
         for chunk in chunk_text(body, section_meta, max_size, overlap):
             # Reinforce heading keys — chunk_text injects chunk_index / char_count
             # into metadata but must not clobber the heading fields.
-            chunk.metadata["heading_path"] = heading_path
+            # Use list() copies so that downstream mutations of
+            # chunk.metadata["heading_path"] do not affect other chunks.
+            chunk.metadata["heading_path"] = list(heading_path)
             chunk.metadata["section_title"] = heading_path[-1] if heading_path else ""
             chunk.metadata["heading_level"] = heading_level
             chunks.append(chunk)
