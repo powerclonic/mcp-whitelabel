@@ -33,7 +33,7 @@ new-ingestion:
 		$(if $(ADAPTER),--adapter $(ADAPTER)) \
 		$(if $(DOMAIN),--domain $(DOMAIN))
 
-## Run an ingestion script inside the server container (recommended for consistency).
+## Run an ingestion script inside the ingestor container (no reranker dependency).
 ## Usage: make ingest SCRIPT=scripts/ingestion/seed_all.py [FORCE=1]
 ## Usage: make ingest SCRIPT=scripts/ingestion/ingest_my_policy.py
 ingest:
@@ -41,11 +41,11 @@ ingest:
 	docker compose run --rm \
 		-v "$(PWD)/scripts:/app/scripts:ro" \
 		-v "$(PWD)/policies:/app/policies:ro" \
-		server uv run python $(SCRIPT) $(if $(FORCE),--force)
+		ingestor uv run python $(SCRIPT) $(if $(FORCE),--force)
 
 ## Run the full seed script inside the container (first-time bootstrap)
 ## Usage: make seed [FORCE=1]
 seed:
 	docker compose run --rm \
 		-v "$(PWD)/scripts:/app/scripts:ro" \
-		server uv run python scripts/ingestion/seed_all.py $(if $(FORCE),--force)
+		ingestor uv run python scripts/ingestion/seed_all.py $(if $(FORCE),--force)
