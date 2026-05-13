@@ -29,7 +29,7 @@ _SENTENCE_END_RE = re.compile(
     "(?<=[.!?][\"'\u201d\u2019)])"   # punct + closing: quote (straight/curly) or )
     "|(?<=[.!?])"                     # bare punct
     ")\\s+"
-    "(?=[A-Z\xc0-\xd6\xd8-\xdd0-9(\\[\"'\u201c\u2018])"
+    "(?=[A-ZÀ-ÖØ-Ý0-9(\\[\"'\u201c\u2018])"
 )
 
 
