@@ -25,8 +25,7 @@ from src.vector.qdrant_client import QdrantAdapter  # noqa: E402
 # ---------------------------------------------------------------------------
 # 1. Configure the pipeline
 # ---------------------------------------------------------------------------
-qdrant    = QdrantAdapter(host=settings.qdrant_host, port=settings.qdrant_port,
-                          collection=settings.qdrant_collection)
+qdrant    = QdrantAdapter(host=settings.qdrant_host, port=settings.qdrant_port)
 embedding = EmbeddingClient(url=settings.embedding_url)
 pipeline  = IngestPipeline(qdrant=qdrant, embedding=embedding)
 

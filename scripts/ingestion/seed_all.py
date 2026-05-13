@@ -18,14 +18,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.adapters.git_adapter import GitAdapter  # noqa: E402
 from src.adapters.markdown_adapter import MarkdownAdapter  # noqa: E402
-from src.adapters.pdf_adapter import PdfAdapter  # noqa: E402
+from src.adapters.pdf_adapter import PDFAdapter  # noqa: E402
 from src.config.settings import settings  # noqa: E402
 from src.domain.ingest_pipeline import IngestPipeline  # noqa: E402
 from src.vector.embedding_client import EmbeddingClient  # noqa: E402
 from src.vector.qdrant_client import QdrantAdapter  # noqa: E402
 
-qdrant    = QdrantAdapter(host=settings.qdrant_host, port=settings.qdrant_port,
-                          collection=settings.qdrant_collection)
+qdrant    = QdrantAdapter(host=settings.qdrant_host, port=settings.qdrant_port)
 embedding = EmbeddingClient(url=settings.embedding_url)
 pipeline  = IngestPipeline(qdrant=qdrant, embedding=embedding)
 
@@ -56,7 +55,7 @@ if md_policy_dir.exists():
 
 # PDF standards
 if pdf_standard_dir.exists():
-    adapter = PdfAdapter()
+    adapter = PDFAdapter()
     for pdf_file in pdf_standard_dir.rglob("*.pdf"):
         SOURCES.append((adapter, dict(
             path=str(pdf_file),
