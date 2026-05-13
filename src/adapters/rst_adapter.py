@@ -7,6 +7,13 @@ import pypandoc
 from src.vector.chunking import Chunk, chunk_markdown
 
 
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+
 class RstAdapter:
     """Ingest reStructuredText from a local file or a remote URL.
 
@@ -48,7 +55,12 @@ class RstAdapter:
         """Return (rst_text, resolved_origin)."""
         raw = str(source)
         if raw.startswith("http://") or raw.startswith("https://"):
-            response = httpx.get(raw, timeout=30, follow_redirects=True)
+            response = httpx.get(
+                raw,
+                timeout=30,
+                follow_redirects=True,
+                headers={"User-Agent": DEFAULT_USER_AGENT},
+            )
             response.raise_for_status()
             return response.text, raw
         text = Path(raw).read_text(encoding="utf-8")
