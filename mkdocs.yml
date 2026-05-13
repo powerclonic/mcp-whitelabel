@@ -1,0 +1,27 @@
+site_name: MCP Governance Server
+site_description: Internal MCP HTTP server for AI governance — Q&A, compliance tools, and multi-source ingestion.
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    primary: indigo
+    accent: indigo
+
+nav:
+  - Home: index.md
+  - Architecture:
+    - Overview: architecture/overview.md
+  - Ingestion:
+    - Overview: ingestion/overview.md
+    - Markdown Adapter: ingestion/markdown.md
+    - PDF Adapter: ingestion/pdf.md
+    - Git Adapter: ingestion/git.md
+    - Web Adapter: ingestion/web.md
+  - MCP Tools:
+    - Tool Reference: tools/reference.md
+  - Operations:
+    - Retention Policy & Snapshots: operations/retention.md
+  - Reference:
+    - Troubleshooting: reference/troubleshooting.md
+    - Governance Update Guide: reference/governance-update.md
