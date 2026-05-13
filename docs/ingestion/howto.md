@@ -3,6 +3,49 @@
 Practical examples for the most common ingestion scenarios.  Each example
 assumes the services are running (`docker compose up -d`).
 
+## Where do ingestion scripts live?
+
+All ingestion scripts belong in **`scripts/ingestion/`**:
+
+```
+scripts/
+├── new_ingestion.py        ← scaffold generator (run via make)
+└── ingestion/
+    ├── _template.py        ← annotated template (do not run directly)
+    ├── seed_all.py         ← bootstraps the full knowledge base
+    └── ingest_*.py         ← one script per source/dataset (generated or hand-crafted)
+```
+
+### Scaffold a new script
+
+```bash
+# Minimal (Markdown + security domain by default)
+make new-ingestion NAME=ingest_container_policy
+
+# Full options
+make new-ingestion NAME=ingest_iso27001 ADAPTER=pdf DOMAIN=compliance
+make new-ingestion NAME=ingest_platform_standards ADAPTER=git DOMAIN=engineering
+make new-ingestion NAME=ingest_gdpr_page ADAPTER=web DOMAIN=legal
+```
+
+This creates `scripts/ingestion/<name>.py` pre-wired with the chosen adapter,
+standard pipeline setup, and incremental-mode support.  Open the file, set the
+real `path`/`url`, adjust the metadata, then run it:
+
+```bash
+uv run python scripts/ingestion/ingest_container_policy.py --force   # first run
+uv run python scripts/ingestion/ingest_container_policy.py            # incremental
+```
+
+### Bootstrap everything at once
+
+```bash
+make seed          # incremental (default — skips already-ingested chunks)
+make seed FORCE=1  # force re-ingest everything
+```
+
+---
+
 ## Setup shared across examples
 
 ```python

@@ -1,4 +1,4 @@
-.PHONY: install dev test lint typecheck build docs
+.PHONY: install dev test lint typecheck build docs new-ingestion seed
 
 install:
 	uv sync
@@ -24,3 +24,16 @@ build:
 
 docs:
 	uv run mkdocs serve
+
+## Ingestion helpers
+## Usage: make new-ingestion NAME=ingest_container_policy [ADAPTER=pdf] [DOMAIN=compliance]
+new-ingestion:
+	@test -n "$(NAME)" || (echo "Usage: make new-ingestion NAME=<script_name>"; exit 1)
+	uv run python scripts/new_ingestion.py $(NAME) \
+		$(if $(ADAPTER),--adapter $(ADAPTER)) \
+		$(if $(DOMAIN),--domain $(DOMAIN))
+
+## Run the full seed script (first-time bootstrap)
+## Usage: make seed [FORCE=1]
+seed:
+	uv run python scripts/ingestion/seed_all.py $(if $(FORCE),--force)
