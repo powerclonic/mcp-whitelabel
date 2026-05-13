@@ -23,14 +23,14 @@ OUTPUT_DIR = Path(__file__).parent / "ingestion"
 
 ADAPTER_IMPORTS = {
     "markdown": "from src.adapters.markdown_adapter import MarkdownAdapter",
-    "pdf":      "from src.adapters.pdf_adapter import PdfAdapter",
+    "pdf":      "from src.adapters.pdf_adapter import PDFAdapter",
     "git":      "from src.adapters.git_adapter import GitAdapter",
     "web":      "from src.adapters.web_adapter import WebAdapter",
 }
 
 ADAPTER_CLASS = {
     "markdown": "MarkdownAdapter",
-    "pdf":      "PdfAdapter",
+    "pdf":      "PDFAdapter",
     "git":      "GitAdapter",
     "web":      "WebAdapter",
 }
@@ -43,7 +43,7 @@ ADAPTER_INGEST_ARGS = {
         '        branch="main",\n'
         '        glob_pattern="**/*.md",       # TODO: adjust glob'
     ),
-    "web":      '        url="https://example.com/policy",  # TODO: set real URL',
+    "web":      '        path_or_url="https://example.com/policy",  # TODO: set real URL',
 }
 
 SOURCE_TYPE_FOR_DOMAIN = {

@@ -5,9 +5,9 @@ Ingests `.pdf` files using `pdfminer.six`.
 ## Usage
 
 ```python
-from src.adapters.pdf_adapter import PdfAdapter
+from src.adapters.pdf_adapter import PDFAdapter
 
-adapter = PdfAdapter()
+adapter = PDFAdapter()
 chunks = adapter.ingest(
     path="docs/standard.pdf",
     metadata={"origin": "standard.pdf", "domain": "compliance"},

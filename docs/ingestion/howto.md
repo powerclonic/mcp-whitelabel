@@ -93,9 +93,9 @@ result = pipeline.run(chunks, incremental=False)
 ## 2 — ISO / regulatory standard (PDF)
 
 ```python
-from src.adapters.pdf_adapter import PdfAdapter
+from src.adapters.pdf_adapter import PDFAdapter
 
-chunks = PdfAdapter().ingest(
+chunks = PDFAdapter().ingest(
     path="standards/iso27001-annex-a.pdf",
     metadata={
         "origin":       "iso27001-annex-a.pdf",
@@ -294,7 +294,7 @@ A single script to seed the knowledge base from scratch:
 """Seed the governance knowledge base from all local policy sources."""
 from pathlib import Path
 from src.adapters.markdown_adapter import MarkdownAdapter
-from src.adapters.pdf_adapter import PdfAdapter
+from src.adapters.pdf_adapter import PDFAdapter
 from src.adapters.git_adapter import GitAdapter
 from src.vector.qdrant_client import QdrantAdapter
 from src.vector.embedding_client import EmbeddingClient
@@ -317,7 +317,7 @@ sources = [
     ],
     # Regulatory PDFs
     *[
-        (PdfAdapter(), dict(
+        (PDFAdapter(), dict(
             path=str(f),
             metadata={"origin": str(f), "source_type": "standard", "domain": "compliance"},
         ))

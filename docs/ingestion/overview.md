@@ -29,7 +29,7 @@ When `incremental=True` (default), the pipeline checks existing chunk IDs in Qdr
 | Adapter | Source | Key options |
 |---|---|---|
 | `MarkdownAdapter` | `.md` files | `metadata` dict |
-| `PdfAdapter` | `.pdf` files | `metadata` dict |
+| `PDFAdapter` | `.pdf` files | `metadata` dict |
 | `GitAdapter` | Git repo | `branch`, `glob_pattern`, `metadata` |
 | `WebAdapter` | URL | `metadata` |
 
