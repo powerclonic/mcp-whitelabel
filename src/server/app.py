@@ -5,8 +5,10 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from src.config.settings import settings
+from src.server.tools import register_tools
 
 mcp = FastMCP(settings.app_name, version=settings.app_version)
+register_tools(mcp)
 
 
 async def health(request: Request) -> JSONResponse:
