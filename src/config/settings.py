@@ -43,8 +43,12 @@ class Settings(BaseSettings):
     rerank_top_n: int = 5         # final results returned to caller
 
     # Chunking
-    chunk_max_size: int = 512
-    chunk_overlap: int = 64
+    # Characters (not tokens).  BGE-M3 processes up to 8192 tokens; 1500 chars
+    # ≈ 375 tokens — a sweet-spot for high-precision retrieval on governance docs.
+    # Overlap is sentence-aware: whole sentences are re-included at the start of
+    # each new chunk up to this character budget.
+    chunk_max_size: int = 1500
+    chunk_overlap: int = 150
 
     # Auth / OIDC
     oidc_issuer: str = "https://auth.example.com"
