@@ -10,9 +10,13 @@ services:
         condition: service_healthy
       embeddings:
         condition: service_started
+      reranker:
+        condition: service_started
     environment:
       QDRANT_HOST: qdrant
-      EMBEDDING_URL: http://embeddings:8001/embed
+      EMBEDDING_BASE_URL: http://embeddings:8001
+      RERANKER_URL: http://reranker:8002/rerank
+      RERANKER_ENABLED: "true"
 
   qdrant:
     image: qdrant/qdrant:v1.13.6
@@ -31,6 +35,12 @@ services:
     command: --model-id BAAI/bge-m3 --port 8001
     ports:
       - "8001:8001"
+
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    command: --model-id BAAI/bge-reranker-v2-m3 --port 8002
+    ports:
+      - "8002:8002"
 
   docs:
     image: squidfunk/mkdocs-material:latest
