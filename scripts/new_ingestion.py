@@ -26,6 +26,7 @@ ADAPTER_IMPORTS = {
     "pdf":      "from src.adapters.pdf_adapter import PDFAdapter",
     "git":      "from src.adapters.git_adapter import GitAdapter",
     "web":      "from src.adapters.web_adapter import WebAdapter",
+    "rst":      "from src.adapters.rst_adapter import RstAdapter",
 }
 
 ADAPTER_CLASS = {
@@ -33,6 +34,7 @@ ADAPTER_CLASS = {
     "pdf":      "PDFAdapter",
     "git":      "GitAdapter",
     "web":      "WebAdapter",
+    "rst":      "RstAdapter",
 }
 
 ADAPTER_INGEST_ARGS = {
@@ -44,6 +46,7 @@ ADAPTER_INGEST_ARGS = {
         '        glob_pattern="**/*.md",       # TODO: adjust glob'
     ),
     "web":      '        path_or_url="https://example.com/policy",  # TODO: set real URL',
+    "rst":      '        path_or_url="path/to/source.rst",  # TODO: local path or https:// URL',
 }
 
 SOURCE_TYPE_FOR_DOMAIN = {
@@ -67,7 +70,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name", help="Script name (e.g. ingest_container_policy)")
     parser.add_argument("--adapter", default="markdown",
-                        choices=["markdown", "pdf", "git", "web"],
+                        choices=["markdown", "pdf", "git", "web", "rst"],
                         help="Source adapter to use (default: markdown)")
     parser.add_argument("--domain", default="security",
                         choices=["security", "compliance", "engineering",
