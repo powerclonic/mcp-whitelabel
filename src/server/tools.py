@@ -1,7 +1,7 @@
 """MCP tool registration.
 
 All four governance tools are registered onto the FastMCP instance here
-via register_tools(mcp).  Dependencies (Qdrant, Embedding, Catalog) are
+via register_tools(mcp).  Dependencies (RetrievalPipeline, Catalog) are
 injected at call time through module-level factories that can be replaced
 in tests.
 """
@@ -15,29 +15,28 @@ from fastmcp import FastMCP
 from src.catalog.models import LibraryStatus
 from src.catalog.repository import InMemoryCatalogRepository
 from src.config.settings import settings
-from src.vector.embedding_client import EmbeddingClient, EmbeddingError
+from src.vector.embedding_client import EmbeddingClient
 from src.vector.qdrant_client import QdrantAdapter
+from src.vector.rerank_client import RerankClient
+from src.vector.retrieval_pipeline import RetrievalPipeline
 
 MIN_SCORE: float = 0.5
 
 # Module-level singletons — replaceable in tests via monkey-patching.
-_qdrant: QdrantAdapter | None = None
-_embedding: EmbeddingClient | None = None
+_pipeline: RetrievalPipeline | None = None
 _catalog: InMemoryCatalogRepository | None = None
 
 
-def _get_qdrant() -> QdrantAdapter:
-    global _qdrant
-    if _qdrant is None:
-        _qdrant = QdrantAdapter()
-    return _qdrant
-
-
-def _get_embedding() -> EmbeddingClient:
-    global _embedding
-    if _embedding is None:
-        _embedding = EmbeddingClient()
-    return _embedding
+def _get_pipeline() -> RetrievalPipeline:
+    global _pipeline
+    if _pipeline is None:
+        reranker = RerankClient() if settings.reranker_enabled else None
+        _pipeline = RetrievalPipeline(
+            qdrant=QdrantAdapter(),
+            embedding_client=EmbeddingClient(),
+            rerank_client=reranker,
+        )
+    return _pipeline
 
 
 def _get_catalog() -> InMemoryCatalogRepository:
@@ -59,7 +58,6 @@ def _normalize_cited_chunks(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "policy_version": h.get("policy_version") or h.get("version_ref", ""),
         }
         for h in hits
-        if h.get("score", 0.0) >= MIN_SCORE
     ]
 
 
@@ -72,13 +70,6 @@ def _insufficient_evidence() -> dict[str, Any]:
     }
 
 
-def _embed_safe(texts: list[str], embedding: EmbeddingClient) -> list[list[float]] | None:
-    try:
-        return embedding.embed(texts)
-    except EmbeddingError:
-        return None
-
-
 # ---------------------------------------------------------------------------
 # Standalone tool implementations (testable without FastMCP runtime)
 # ---------------------------------------------------------------------------
@@ -86,21 +77,15 @@ def _embed_safe(texts: list[str], embedding: EmbeddingClient) -> list[list[float
 def search_governance(
     query: str,
     domain: str | None,
-    qdrant: QdrantAdapter,
-    embedding: EmbeddingClient,
+    pipeline: RetrievalPipeline,
 ) -> dict[str, Any]:
-    vectors = _embed_safe([query], embedding)
-    if vectors is None:
-        return {**_insufficient_evidence(), "results": []}
-
     filters = {"domain": domain} if domain else None
-    hits = qdrant.search(settings.qdrant_collection, vectors[0], filters=filters, top_k=5)
-    above_threshold = [h for h in hits if h.get("score", 0.0) >= MIN_SCORE]
+    hits = pipeline.retrieve(query, settings.qdrant_collection, filters=filters)
 
-    if not above_threshold:
+    if not hits:
         return {**_insufficient_evidence(), "results": []}
 
-    cited = _normalize_cited_chunks(above_threshold)
+    cited = _normalize_cited_chunks(hits)
     return {
         "found": True,
         "results": [
@@ -111,7 +96,7 @@ def search_governance(
                 "origin": h.get("origin", ""),
                 "policy_version": h.get("policy_version") or h.get("version_ref", ""),
             }
-            for h in above_threshold
+            for h in hits
         ],
         "cited_chunks": cited,
     }
@@ -120,8 +105,7 @@ def search_governance(
 def check_library_compliance(
     name: str,
     version: str,
-    qdrant: QdrantAdapter,
-    embedding: EmbeddingClient,
+    pipeline: RetrievalPipeline,
     catalog: InMemoryCatalogRepository,
 ) -> dict[str, Any]:
     entry = catalog.get_library(name, version)
@@ -144,16 +128,11 @@ def check_library_compliance(
             "cited_chunks": [catalog_citation],
         }
 
-    vectors = _embed_safe([f"{name} {version}"], embedding)
-    if vectors is None:
+    hits = pipeline.retrieve(f"{name} {version}", settings.qdrant_collection)
+    if not hits:
         return _insufficient_evidence()
 
-    hits = qdrant.search(settings.qdrant_collection, vectors[0], filters=None, top_k=5)
-    relevant = [h for h in hits if h.get("score", 0.0) >= MIN_SCORE]
-    if not relevant:
-        return _insufficient_evidence()
-
-    cited = _normalize_cited_chunks(relevant)
+    cited = _normalize_cited_chunks(hits)
     return {
         "found": True,
         "status": "warning",
@@ -168,20 +147,14 @@ def check_library_compliance(
 def check_code_compliance(
     snippet: str,
     domain: str | None,
-    qdrant: QdrantAdapter,
-    embedding: EmbeddingClient,
+    pipeline: RetrievalPipeline,
 ) -> dict[str, Any]:
-    vectors = _embed_safe([snippet], embedding)
-    if vectors is None:
-        return _insufficient_evidence()
-
     filters = {"domain": domain} if domain else None
-    hits = qdrant.search(settings.qdrant_collection, vectors[0], filters=filters, top_k=5)
-    relevant = [h for h in hits if h.get("score", 0.0) >= MIN_SCORE]
-    if not relevant:
+    hits = pipeline.retrieve(snippet, settings.qdrant_collection, filters=filters)
+    if not hits:
         return _insufficient_evidence()
 
-    cited = _normalize_cited_chunks(relevant)
+    cited = _normalize_cited_chunks(hits)
     return {
         "found": True,
         "status": "warning",
@@ -196,19 +169,14 @@ def check_code_compliance(
 def check_infra_compliance(
     definition: str,
     type: str | None,
-    qdrant: QdrantAdapter,
-    embedding: EmbeddingClient,
+    pipeline: RetrievalPipeline,
 ) -> dict[str, Any]:
     violations = _detect_infra_violations(definition, type)
 
-    vectors = _embed_safe([definition], embedding)
-    hits: list[dict[str, Any]] = []
-    if vectors is not None:
-        hits = qdrant.search(settings.qdrant_collection, vectors[0], filters=None, top_k=5)
-    relevant = [h for h in hits if h.get("score", 0.0) >= MIN_SCORE]
+    hits = pipeline.retrieve(definition, settings.qdrant_collection)
 
     if violations:
-        cited = _normalize_cited_chunks(relevant)
+        cited = _normalize_cited_chunks(hits)
         return {
             "found": True,
             "status": "non_compliant",
@@ -216,10 +184,10 @@ def check_infra_compliance(
             "cited_chunks": cited,
         }
 
-    if not relevant:
+    if not hits:
         return _insufficient_evidence()
 
-    cited = _normalize_cited_chunks(relevant)
+    cited = _normalize_cited_chunks(hits)
     return {
         "found": True,
         "status": "warning",
@@ -276,7 +244,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         Required scope: query:read
         """
-        return search_governance(query, domain, _get_qdrant(), _get_embedding())
+        return search_governance(query, domain, _get_pipeline())
 
     @mcp.tool()
     def check_library_compliance_tool(
@@ -288,7 +256,7 @@ def register_tools(mcp: FastMCP) -> None:
         Catalog takes precedence over vector search.
         Required scope: compliance:read
         """
-        return check_library_compliance(name, version, _get_qdrant(), _get_embedding(), _get_catalog())
+        return check_library_compliance(name, version, _get_pipeline(), _get_catalog())
 
     @mcp.tool()
     def check_code_compliance_tool(
@@ -300,7 +268,7 @@ def register_tools(mcp: FastMCP) -> None:
         Only cites retrieved evidence — never invents rules.
         Required scope: compliance:read
         """
-        return check_code_compliance(snippet, domain, _get_qdrant(), _get_embedding())
+        return check_code_compliance(snippet, domain, _get_pipeline())
 
     @mcp.tool()
     def check_infra_compliance_tool(
@@ -313,5 +281,5 @@ def register_tools(mcp: FastMCP) -> None:
         hardcoded secrets) and cross-references with retrieved evidence.
         Required scope: compliance:read
         """
-        return check_infra_compliance(definition, type, _get_qdrant(), _get_embedding())
+        return check_infra_compliance(definition, type, _get_pipeline())
 
