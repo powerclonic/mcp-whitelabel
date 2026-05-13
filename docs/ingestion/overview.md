@@ -33,8 +33,9 @@ When `incremental=True` (default), the pipeline checks existing chunk IDs in Qdr
 | `GitAdapter` | Git repo | `branch`, `glob_pattern`, `metadata` |
 | `WebAdapter` | URL | `metadata` |
 
-See adapter-specific guides:
+## Guides
 
+- [How-To: practical ingestion examples](howto.md) — security policies, PDFs, Git repos, Confluence exports, catalog setup, error handling
 - [Markdown Adapter](markdown.md)
 - [PDF Adapter](pdf.md)
 - [Git Adapter](git.md)

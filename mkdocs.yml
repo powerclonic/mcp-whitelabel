@@ -14,6 +14,7 @@ nav:
     - Overview: architecture/overview.md
   - Ingestion:
     - Overview: ingestion/overview.md
+    - How-To Examples: ingestion/howto.md
     - Markdown Adapter: ingestion/markdown.md
     - PDF Adapter: ingestion/pdf.md
     - Git Adapter: ingestion/git.md
