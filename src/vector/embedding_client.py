@@ -24,26 +24,35 @@ class EmbeddingClient:
     def model(self) -> str:
         return self._model
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Call the self-hosted embedding endpoint and return embedding vectors."""
-        try:
-            response = httpx.post(
-                self._url,
-                json={"inputs": texts, "model": self._model},
-                timeout=self._timeout,
-            )
-        except httpx.RequestError as exc:
-            raise EmbeddingError(f"Connection error: {exc}") from exc
+    def embed(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
+        """Call the self-hosted embedding endpoint and return embedding vectors.
 
-        if response.status_code != 200:
-            raise EmbeddingError(
-                f"Embedding service returned HTTP {response.status_code}: {response.text}"
-            )
-        data = response.json()
-        # Support both {"embeddings": [...]} and plain list responses
-        if isinstance(data, list):
-            return data  # type: ignore[return-value]
-        return data["embeddings"]  # type: ignore[return-value]
+        Splits large inputs into batches of ``batch_size`` to respect server limits.
+        """
+        if not texts:
+            return []
+
+        results: list[list[float]] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            try:
+                response = httpx.post(
+                    self._url,
+                    json={"inputs": batch, "model": self._model},
+                    timeout=self._timeout,
+                )
+            except httpx.RequestError as exc:
+                raise EmbeddingError(f"Connection error: {exc}") from exc
+
+            if response.status_code != 200:
+                raise EmbeddingError(
+                    f"Embedding service returned HTTP {response.status_code}: {response.text}"
+                )
+            data = response.json()
+            batch_vectors: list[list[float]] = data if isinstance(data, list) else data["embeddings"]
+            results.extend(batch_vectors)
+
+        return results
 
     def embed_with_metadata(
         self, texts: list[str], extra_metadata: dict[str, Any] | None = None
