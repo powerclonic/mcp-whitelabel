@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -131,7 +131,9 @@ def test_ingest_url(adapter: RstAdapter) -> None:
             "timestamp": "2001-07-05",
         })
 
-    mock_get.assert_called_once_with(url, timeout=30, follow_redirects=True)
+    mock_get.assert_called_once_with(
+        url, timeout=30, follow_redirects=True, headers={"User-Agent": ANY}
+    )
     assert len(chunks) >= 1
     assert all(c.metadata["origin"] == url for c in chunks)
     assert all(c.metadata["domain"] == "engineering" for c in chunks)
