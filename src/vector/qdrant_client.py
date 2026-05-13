@@ -107,9 +107,10 @@ class QdrantAdapter:
     ) -> None:
         """Upsert chunks with their embedding vectors into the collection.
 
-        When *sparse_vectors* is provided and the collection schema is *hybrid*,
-        stores both dense and sparse named vectors. Otherwise falls back to the
-        legacy single-vector format.
+        When the collection schema is *hybrid*, always uses named vector format.
+        If *sparse_vectors* is also provided, includes the sparse vector; otherwise
+        stores only the ``dense`` named vector. Falls back to the legacy
+        single-vector format only for *legacy* collections.
         """
         self._ensure_collection(collection)
         schema = self._collection_schema(collection)
@@ -133,6 +134,9 @@ class QdrantAdapter:
                     _DENSE_VECTOR: dense_vec,
                     _SPARSE_VECTOR: _to_sparse_vector(sparse_vectors[idx]),
                 }
+            elif schema == "hybrid":
+                # Collection has named vectors; omit sparse when unavailable
+                vector = {_DENSE_VECTOR: dense_vec}
             else:
                 vector = dense_vec
 
@@ -194,6 +198,15 @@ class QdrantAdapter:
                     ),
                 ],
                 query=qm.FusionQuery(fusion=qm.Fusion.RRF),
+                limit=top_k,
+            )
+        elif schema == "hybrid":
+            # Hybrid collection but no sparse query — search dense vector by name
+            results = self._client.query_points(
+                collection_name=collection,
+                query=vector,
+                using=_DENSE_VECTOR,
+                query_filter=query_filter,
                 limit=top_k,
             )
         else:
