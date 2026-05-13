@@ -64,7 +64,9 @@ class TestChunkTextSentenceAware:
         assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
 
     def test_sentence_boundary_respected(self) -> None:
-        # With a tight window, each sentence lands in its own chunk
+        # With a tight window, each sentence lands in its own chunk.
+        # Verify that every input sentence appears *whole* in some chunk
+        # (i.e. sentences are not split mid-way).
         sentences = [
             "Alpha is the first rule.",
             "Beta is the second rule.",
@@ -72,10 +74,10 @@ class TestChunkTextSentenceAware:
         ]
         text = " ".join(sentences)
         chunks = chunk_text(text, {}, max_size=40, overlap=0)
-        # Every chunk content must not cut a sentence — it must start/end at
-        # sentence-like boundaries (no bare lowercase continuation mid-word)
-        for chunk in chunks:
-            assert chunk.content.strip() != ""
+        for sentence in sentences:
+            assert any(sentence in c.content for c in chunks), (
+                f"{sentence!r} not found whole in any chunk"
+            )
 
     def test_paragraph_boundaries_respected(self) -> None:
         # Two short paragraphs that each fit alone but together exceed max_size
@@ -101,19 +103,21 @@ class TestChunkTextSentenceAware:
             assert chunk.metadata["char_count"] == len(chunk.content)
 
     def test_overlap_starts_at_sentence_boundary(self) -> None:
-        # With sentence-aware overlap the seeded sentences must appear verbatim
-        # at the start of the following chunk.
+        # Verify sentence-aware overlap: a sentence from the end of one chunk
+        # is re-included (seeded) at the start of the next chunk.
         s1 = "The policy requires approval from the security committee."
         s2 = "All exceptions must be logged within twenty-four hours."
         s3 = "Violations trigger an automatic incident report."
         text = f"{s1} {s2} {s3}"
-        # Tight window so each sentence lands mostly alone; overlap seeds s2 into chunk2
-        chunks = chunk_text(text, {}, max_size=70, overlap=60)
-        # At least the overlapping sentence content should appear in more than one chunk
-        all_contents = [c.content for c in chunks]
-        # s2 is 55 chars — with overlap=60 it should seed into the next chunk
-        overlap_count = sum(1 for c in all_contents if s2[:20] in c)
-        assert overlap_count >= 1
+        # max_size=120 fits s1+s2 together (112 chars) but not all three (159).
+        # overlap=60 >= len(s2)=54, so s2 should be seeded into the chunk that
+        # opens with s3, causing s2 to appear in two distinct chunks.
+        chunks = chunk_text(text, {}, max_size=120, overlap=60)
+        s2_chunk_count = sum(1 for c in chunks if s2[:20] in c.content)
+        assert s2_chunk_count >= 2, (
+            f"Expected s2 to appear in >=2 chunks (overlap seed), "
+            f"found it in {s2_chunk_count}: {[c.content for c in chunks]}"
+        )
 
 
 class TestChunkMarkdown:

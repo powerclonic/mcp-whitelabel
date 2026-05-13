@@ -6,11 +6,25 @@ from typing import Any
 from src.config.settings import settings
 
 # Conservative sentence boundary detector.
+#
 # Splits on end-of-sentence punctuation (.!?) followed by whitespace and an
-# uppercase letter (or opening quote/bracket), which covers the vast majority
-# of English and Portuguese sentence endings while avoiding false positives on
+# uppercase letter (or opening bracket), which covers the vast majority of
+# English and Portuguese sentence endings while avoiding false positives on
 # abbreviations like "e.g. something" or decimal numbers like "v2.0 adds".
-_SENTENCE_END_RE = re.compile(r'(?<=[.!?])["\']?\s+(?=[A-Z\(\"\[])')
+#
+# Two lookbehind alternatives handle optional closing quotes:
+#   (?<=[.!?]["'])  — sentence ends with punctuation + closing quote (e.g. `."`)
+#   (?<=[.!?])      — sentence ends with bare punctuation
+# Using two fixed-width alternatives instead of a variable-width `["\']?`
+# ensures the closing quote stays attached to the preceding sentence.
+#
+# The lookahead `[A-ZÀ-ÖØ-Ý\(\"\[]` covers ASCII uppercase AND Latin-1
+# supplement uppercase letters (including all Portuguese accented capitals:
+# À Á Â Ã Ç É Ê Í Ó Ô Õ Ú), so sentence starts with e.g. "Última análise."
+# are detected correctly.
+_SENTENCE_END_RE = re.compile(
+    r'(?:(?<=[.!?]["\'])|(?<=[.!?]))\s+(?=[A-ZÀ-ÖØ-Ý\(\"\[])'
+)
 
 
 @dataclass
@@ -47,7 +61,13 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def _char_split(text: str, max_size: int, overlap: int) -> list[str]:
-    """Hard character split — last resort for tokens that individually exceed *max_size*."""
+    """Hard character split — last resort for tokens that individually exceed *max_size*.
+
+    ``overlap`` is clamped to ``max_size - 1`` so the sliding window always
+    advances by at least one character, preventing an infinite loop when the
+    caller passes ``overlap >= max_size``.
+    """
+    overlap = max(0, min(overlap, max_size - 1))
     parts: list[str] = []
     start = 0
     while start < len(text):
@@ -125,24 +145,36 @@ def _build_chunks(
 
         # ── Unit is larger than the entire window → flush, then hard-split ──
         if unit_len > max_size:
+            seed: list[str] = []
             if buffer:
                 _flush()
-                buffer = _overlap_seed(buffer, overlap)
-            for part in _char_split(unit, max_size, overlap):
-                part = part.strip()
+                seed = _overlap_seed(buffer, overlap)
+                buffer = []
+            # Combine the overlap seed with the first hard-split fragment so it
+            # is not emitted as a standalone micro-chunk.
+            first_part = True
+            for raw_part in _char_split(unit, max_size, overlap):
+                part = raw_part.strip()
                 if not part:
                     continue
-                if buffer:
-                    _flush()
-                    buffer = []
-                buffer = [part]
+                if first_part and seed:
+                    buffer = seed + [part]
+                    first_part = False
+                else:
+                    if buffer:
+                        _flush()
+                    buffer = [part]
+                    first_part = False
             continue
 
         # ── Adding this unit would overflow the buffer → flush first ──
         sep = 1 if buffer else 0
         if buffer and len(_buffer_text()) + sep + unit_len > max_size:
             _flush()
-            buffer = _overlap_seed(buffer, overlap)
+            # Bound the seed so that seed_chars + sep + unit_len <= max_size,
+            # preventing the buffer from exceeding max_size after appending unit.
+            max_seed = max(0, max_size - unit_len - 1)
+            buffer = _overlap_seed(buffer, min(overlap, max_seed))
 
         buffer.append(unit)
 
