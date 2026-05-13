@@ -169,8 +169,11 @@ class TestChunkTextSentenceAware:
         chunks = chunk_markdown(md, {}, max_size=30, overlap=0)
         headed = [c for c in chunks if c.metadata.get("heading_path")]
         assert len(headed) >= 1
-        original_path = list(headed[0].metadata["heading_path"])
-        headed[0].metadata["heading_path"].append("MUTATED")
+        # Store original path value and a direct reference to the list, then
+        # mutate through the reference — sibling chunks must be unaffected.
+        path_ref = headed[0].metadata["heading_path"]
+        original_path = list(path_ref)
+        path_ref.append("MUTATED")
         for other in headed[1:]:
             assert other.metadata["heading_path"] == original_path, (
                 "heading_path list is shared across chunks"
