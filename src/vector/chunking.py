@@ -7,23 +7,29 @@ from src.config.settings import settings
 
 # Conservative sentence boundary detector.
 #
-# Splits on end-of-sentence punctuation (.!?) followed by whitespace and an
-# uppercase letter (or opening bracket), which covers the vast majority of
-# English and Portuguese sentence endings while avoiding false positives on
-# abbreviations like "e.g. something" or decimal numbers like "v2.0 adds".
+# Splits on end-of-sentence punctuation (.!?) followed by whitespace and the
+# start of a new sentence.  Uses two fixed-width lookbehind alternatives so
+# closing punctuation (quotes, parens) stays attached to the preceding sentence.
 #
-# Two lookbehind alternatives handle optional closing quotes:
-#   (?<=[.!?]["'])  — sentence ends with punctuation + closing quote (e.g. `."`)
-#   (?<=[.!?])      — sentence ends with bare punctuation
-# Using two fixed-width alternatives instead of a variable-width `["\']?`
-# ensures the closing quote stays attached to the preceding sentence.
+# Lookbehind alternatives (width-2 first, width-1 fallback):
+#   (?<=[.!?]["'"\u2019)])   — punct + closing: straight/curly quote or `)`
+#   (?<=[.!?])               — bare punctuation
 #
-# The lookahead `[A-ZÀ-ÖØ-Ý\(\"\[]` covers ASCII uppercase AND Latin-1
-# supplement uppercase letters (including all Portuguese accented capitals:
-# À Á Â Ã Ç É Ê Í Ó Ô Õ Ú), so sentence starts with e.g. "Última análise."
-# are detected correctly.
+# Lookahead covers common sentence openers:
+#   A-Z, À-Ö, Ø-Ý           — ASCII and Latin-1 uppercase, including all
+#                              Portuguese accented capitals (Á Â Ã Ç É Ê Í …)
+#   0-9                      — digit-led sentences ("2024 brought new rules.")
+#   ( [ " ' " '              — opening bracket or straight/curly quotation mark
+#
+# Known limitation: sentences starting with a lowercase letter (uncommon in
+# formal governance documents) are not detected, deliberately avoiding false
+# splits on abbreviations ("e.g.", "i.e.", "vs.") and decimal numbers.
 _SENTENCE_END_RE = re.compile(
-    r'(?:(?<=[.!?]["\'])|(?<=[.!?]))\s+(?=[A-ZÀ-ÖØ-Ý\(\"\[])'
+    "(?:"
+    "(?<=[.!?][\"'\u201d\u2019)])"   # punct + closing: quote (straight/curly) or )
+    "|(?<=[.!?])"                     # bare punct
+    ")\\s+"
+    "(?=[A-Z\xc0-\xd6\xd8-\xdd0-9(\\[\"'\u201c\u2018])"
 )
 
 
@@ -210,6 +216,12 @@ def chunk_text(
     Overlap is sentence-aware: the new chunk is seeded with whole sentences
     from the tail of the previous chunk (up to *overlap* characters) so every
     chunk starts at a sentence boundary.
+
+    The sentence boundary detector recognises upper-case ASCII and Latin-1
+    letters (covering all Portuguese accented capitals), leading digits, and
+    opening bracket/quote characters.  Sentences that start with a lowercase
+    letter are deliberately not split from the preceding sentence — this avoids
+    false breaks on abbreviations (``e.g.``, ``i.e.``) and decimal numbers.
 
     Every :class:`Chunk` receives:
 

@@ -119,8 +119,36 @@ class TestChunkTextSentenceAware:
             f"found it in {s2_chunk_count}: {[c.content for c in chunks]}"
         )
 
+    def test_sentence_starting_with_digit(self) -> None:
+        # A sentence that begins with a digit must be split correctly.
+        s1 = "The policy was revised."
+        s2 = "2024 brought stricter requirements."
+        text = f"{s1} {s2}"
+        # max_size must fit either sentence alone but not both together
+        max_size = max(len(s1), len(s2)) + 5
+        chunks = chunk_text(text, {}, max_size=max_size, overlap=0)
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
 
-class TestChunkMarkdown:
+    def test_sentence_with_closing_paren(self) -> None:
+        # A sentence that ends with .) must not lose the closing paren and must
+        # be split correctly from the following sentence.
+        s1 = "The committee approved the motion (unanimously.)"
+        s2 = "All dissenting votes were recorded."
+        text = f"{s1} {s2}"
+        chunks = chunk_text(text, {}, max_size=len(s1) + 5, overlap=0)
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
+
+    def test_sentence_with_curly_quotes(self) -> None:
+        # Sentences delimited by curly quotes must be split without dropping
+        # the closing quote or mis-starting the next sentence.
+        s1 = "He declared \u201cApproved.\u201d"   # "Approved."
+        s2 = "\u201cAll teams must comply.\u201d"   # "All teams must comply."
+        text = f"{s1} {s2}"
+        chunks = chunk_text(text, {}, max_size=len(s1) + 5, overlap=0)
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
     SAMPLE_MD = """# Title
 
 Intro text about the document.
