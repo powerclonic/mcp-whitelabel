@@ -132,6 +132,64 @@ class TestEmbeddingClient:
             assert meta["embedding_model"] == "bge-m3"
 
 
+class TestEmbeddingClientSparse:
+    def test_embed_sparse_returns_token_weights(self) -> None:
+        with patch("httpx.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = [
+                [{"index": 42, "value": 0.9}, {"index": 7, "value": 0.3}],
+                [{"index": 1, "value": 0.5}],
+            ]
+            mock_post.return_value = mock_resp
+
+            from src.vector.embedding_client import EmbeddingClient
+
+            client = EmbeddingClient(
+                url="http://test/embed",
+                sparse_url="http://test/embed_sparse",
+                model="bge-m3",
+            )
+            result = client.embed_sparse(["text1", "text2"])
+
+        assert result is not None
+        assert len(result) == 2
+        assert result[0][0]["index"] == 42
+        assert result[0][0]["value"] == pytest.approx(0.9)
+
+    def test_embed_sparse_returns_none_on_http_error(self) -> None:
+        with patch("httpx.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 503
+            mock_post.return_value = mock_resp
+
+            from src.vector.embedding_client import EmbeddingClient
+
+            client = EmbeddingClient(
+                url="http://test/embed",
+                sparse_url="http://test/embed_sparse",
+                model="bge-m3",
+            )
+            result = client.embed_sparse(["text"])
+
+        assert result is None
+
+    def test_embed_sparse_returns_none_on_network_error(self) -> None:
+        import httpx
+
+        with patch("httpx.post", side_effect=httpx.RequestError("timeout")):
+            from src.vector.embedding_client import EmbeddingClient
+
+            client = EmbeddingClient(
+                url="http://test/embed",
+                sparse_url="http://test/embed_sparse",
+                model="bge-m3",
+            )
+            result = client.embed_sparse(["text"])
+
+        assert result is None
+
+
 class TestQdrantAdapter:
     def _make_chunk(self, content: str = "test content") -> Chunk:
         return Chunk(
@@ -151,6 +209,7 @@ class TestQdrantAdapter:
             mock_instance = MagicMock()
             MockClient.return_value = mock_instance
             mock_instance.get_collections.return_value.collections = []
+            mock_instance.get_collection.return_value.config.params.vectors = {"dense": MagicMock()}
 
             from src.vector.qdrant_client import QdrantAdapter
 
@@ -169,6 +228,7 @@ class TestQdrantAdapter:
             mock_instance.get_collections.return_value.collections = [
                 MagicMock(name="test_col")
             ]
+            mock_instance.get_collection.return_value.config.params.vectors = {}
 
             mock_result = MagicMock()
             mock_result.score = 0.95
