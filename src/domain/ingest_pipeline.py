@@ -1,10 +1,13 @@
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.config.settings import settings
 from src.vector.chunking import Chunk
 from src.vector.embedding_client import EmbeddingClient, EmbeddingError
 from src.vector.qdrant_client import QdrantAdapter
-from src.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -15,7 +18,17 @@ class PipelineResult:
 
 
 class IngestPipeline:
-    """Orchestrates: adapt → chunk → embed → upsert."""
+    """Orchestrates: adapt → chunk → embed → upsert.
+
+    When ``settings.sparse_search_enabled`` is True, also embeds sparse
+    token-weight vectors (via TEI ``/embed_sparse``) and stores them alongside
+    dense vectors so that hybrid retrieval can leverage both. Sparse embedding
+    failures are non-fatal: a warning is logged and ingestion continues with
+    dense-only vectors.
+
+    Note: existing collections ingested without sparse vectors require
+    re-ingestion (pass ``incremental=False``) to gain hybrid search benefits.
+    """
 
     def __init__(
         self,
@@ -54,17 +67,36 @@ class IngestPipeline:
             return result
 
         texts = [c.content for c in to_ingest]
+
         try:
-            vectors: list[list[float]] = self._embedding.embed(texts)
+            dense_vectors: list[list[float]] = self._embedding.embed(texts)
         except EmbeddingError as exc:
             result.errors.append(f"embedding failed: {exc}")
             return result
 
-        for chunk, vector in zip(to_ingest, vectors):
+        sparse_vectors: list[list[dict[str, Any]]] | None = None
+        if settings.sparse_search_enabled:
+            sparse_result = self._embedding.embed_sparse(texts)
+            if sparse_result is not None:
+                sparse_vectors = sparse_result
+            else:
+                logger.warning(
+                    "Sparse embedding unavailable for batch of %d chunks — ingesting dense-only",
+                    len(to_ingest),
+                )
+
+        for idx, (chunk, dense_vec) in enumerate(zip(to_ingest, dense_vectors)):
+            sparse_batch = [sparse_vectors[idx]] if sparse_vectors is not None else None
             try:
-                self._qdrant.upsert_chunks(self._collection, [chunk], [vector])
+                self._qdrant.upsert_chunks(
+                    self._collection,
+                    [chunk],
+                    [dense_vec],
+                    sparse_vectors=sparse_batch,
+                )
                 result.ingested += 1
             except Exception as exc:  # noqa: BLE001
                 result.errors.append(f"upsert failed for {chunk.chunk_id}: {exc}")
 
         return result
+
