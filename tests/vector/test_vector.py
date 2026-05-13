@@ -49,7 +49,136 @@ class TestChunkText:
         assert indices == list(range(len(chunks)))
 
 
-class TestChunkMarkdown:
+class TestChunkTextSentenceAware:
+    """Verify that chunk_text never cuts mid-sentence and respects paragraph boundaries."""
+
+    def test_no_mid_sentence_cut(self) -> None:
+        # Two long sentences that together exceed max_size=80 must each appear
+        # complete inside exactly one chunk — no sentence is split across chunks.
+        s1 = "The first sentence describes the governance policy in full detail."
+        s2 = "The second sentence explains the compliance requirements for all teams."
+        text = f"{s1} {s2}"
+        chunks = chunk_text(text, {}, max_size=80, overlap=0)
+        # Each sentence must appear whole in at least one chunk
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
+
+    def test_sentence_boundary_respected(self) -> None:
+        # With a tight window, each sentence lands in its own chunk.
+        # Verify that every input sentence appears *whole* in some chunk
+        # (i.e. sentences are not split mid-way).
+        sentences = [
+            "Alpha is the first rule.",
+            "Beta is the second rule.",
+            "Gamma is the third rule.",
+        ]
+        text = " ".join(sentences)
+        chunks = chunk_text(text, {}, max_size=40, overlap=0)
+        for sentence in sentences:
+            assert any(sentence in c.content for c in chunks), (
+                f"{sentence!r} not found whole in any chunk"
+            )
+
+    def test_paragraph_boundaries_respected(self) -> None:
+        # Two short paragraphs that each fit alone but together exceed max_size
+        para1 = "First paragraph about security policies."
+        para2 = "Second paragraph about compliance standards."
+        text = f"{para1}\n\n{para2}"
+        # max_size smaller than combined length but larger than each paragraph
+        chunks = chunk_text(text, {}, max_size=len(para1) + 5, overlap=0)
+        # Paragraphs should not bleed into each other
+        contents = [c.content for c in chunks]
+        assert any(para1 in c for c in contents)
+        assert any(para2 in c for c in contents)
+
+    def test_char_count_in_metadata(self) -> None:
+        chunks = chunk_text("Hello world. This is a test sentence.", {}, max_size=512, overlap=0)
+        assert len(chunks) == 1
+        assert chunks[0].metadata["char_count"] == len(chunks[0].content)
+
+    def test_char_count_matches_content_length(self) -> None:
+        text = "A " * 100  # 200 chars
+        chunks = chunk_text(text, {}, max_size=50, overlap=0)
+        for chunk in chunks:
+            assert chunk.metadata["char_count"] == len(chunk.content)
+
+    def test_overlap_starts_at_sentence_boundary(self) -> None:
+        # Verify sentence-aware overlap: a sentence from the end of one chunk
+        # is re-included (seeded) at the start of the next chunk.
+        s1 = "The policy requires approval from the security committee."
+        s2 = "All exceptions must be logged within twenty-four hours."
+        s3 = "Violations trigger an automatic incident report."
+        text = f"{s1} {s2} {s3}"
+        # max_size=120 fits s1+s2 together (112 chars) but not all three (159).
+        # overlap=60 >= len(s2)=54, so s2 should be seeded into the chunk that
+        # opens with s3, causing s2 to appear in two distinct chunks.
+        chunks = chunk_text(text, {}, max_size=120, overlap=60)
+        s2_chunk_count = sum(1 for c in chunks if s2[:20] in c.content)
+        assert s2_chunk_count >= 2, (
+            f"Expected s2 to appear in >=2 chunks (overlap seed), "
+            f"found it in {s2_chunk_count}: {[c.content for c in chunks]}"
+        )
+
+    def test_sentence_starting_with_digit(self) -> None:
+        # A sentence that begins with a digit must be split correctly.
+        s1 = "The policy was revised."
+        s2 = "2024 brought stricter requirements."
+        text = f"{s1} {s2}"
+        # max_size must fit either sentence alone but not both together
+        max_size = max(len(s1), len(s2)) + 5
+        chunks = chunk_text(text, {}, max_size=max_size, overlap=0)
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
+
+    def test_sentence_with_closing_paren(self) -> None:
+        # A sentence that ends with .) must not lose the closing paren and must
+        # be split correctly from the following sentence.
+        s1 = "The committee approved the motion (unanimously.)"
+        s2 = "All dissenting votes were recorded."
+        text = f"{s1} {s2}"
+        chunks = chunk_text(text, {}, max_size=len(s1) + 5, overlap=0)
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
+
+    def test_sentence_with_curly_quotes(self) -> None:
+        # Sentences delimited by curly quotes must be split without dropping
+        # the closing quote or mis-starting the next sentence.
+        s1 = "He declared \u201cApproved.\u201d"   # "Approved."
+        s2 = "\u201cAll teams must comply.\u201d"   # "All teams must comply."
+        text = f"{s1} {s2}"
+        chunks = chunk_text(text, {}, max_size=len(s1) + 5, overlap=0)
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
+
+    def test_unquoted_then_quoted_sentence_regression(self) -> None:
+        # Regression: unquoted sentence ending with ." (closing curly quote)
+        # followed by a capital-letter next sentence must split correctly.
+        # The width-2 lookbehind (?<=[.!?]") must fire before the width-1
+        # fallback to avoid the closing quote leaking into the next chunk.
+        s1 = "The decision was final.\u201d"   # ends with closing curly quote
+        s2 = "All teams must comply."
+        text = f"{s1} {s2}"
+        max_size = max(len(s1), len(s2)) + 5
+        chunks = chunk_text(text, {}, max_size=max_size, overlap=0)
+        assert any(s1 in c.content for c in chunks), f"{s1!r} not found whole in any chunk"
+        assert any(s2 in c.content for c in chunks), f"{s2!r} not found whole in any chunk"
+
+    def test_heading_path_not_shared_across_chunks(self) -> None:
+        # Regression: mutating heading_path on one chunk must not affect others.
+        md = "# Section\n\nFirst sentence. Second sentence. Third sentence."
+        chunks = chunk_markdown(md, {}, max_size=30, overlap=0)
+        headed = [c for c in chunks if c.metadata.get("heading_path")]
+        assert len(headed) >= 1
+        # Store original path value and a direct reference to the list, then
+        # mutate through the reference — sibling chunks must be unaffected.
+        path_ref = headed[0].metadata["heading_path"]
+        original_path = list(path_ref)
+        path_ref.append("MUTATED")
+        for other in headed[1:]:
+            assert other.metadata["heading_path"] == original_path, (
+                "heading_path list is shared across chunks"
+            )
+
     SAMPLE_MD = """# Title
 
 Intro text about the document.
@@ -89,6 +218,35 @@ Another section with its own content.
 
     def test_empty_markdown_returns_empty(self) -> None:
         assert chunk_markdown("", {}) == []
+
+    def test_section_title_in_metadata(self) -> None:
+        chunks = chunk_markdown(self.SAMPLE_MD, {})
+        # Every chunk from a headed section must carry section_title
+        headed = [c for c in chunks if c.metadata.get("heading_path")]
+        assert all(
+            c.metadata.get("section_title") == c.metadata["heading_path"][-1]
+            for c in headed
+        )
+
+    def test_section_title_empty_for_pre_heading_content(self) -> None:
+        md = "Some intro before any heading.\n\n# First Heading\n\nBody text."
+        chunks = chunk_markdown(md, {})
+        pre = [c for c in chunks if c.metadata.get("heading_path") == []]
+        assert all(c.metadata.get("section_title") == "" for c in pre)
+
+    def test_heading_level_in_metadata(self) -> None:
+        chunks = chunk_markdown(self.SAMPLE_MD, {})
+        # Chunks whose section_title is "Title" (the h1) must have heading_level == 1
+        title_chunks = [c for c in chunks if c.metadata.get("section_title") == "Title"]
+        assert all(c.metadata.get("heading_level") == 1 for c in title_chunks)
+        # Chunks under the h3 Subsection must have heading_level == 3
+        sub_chunks = [c for c in chunks if c.metadata.get("section_title") == "Subsection"]
+        assert all(c.metadata.get("heading_level") == 3 for c in sub_chunks)
+
+    def test_char_count_in_markdown_chunks(self) -> None:
+        chunks = chunk_markdown(self.SAMPLE_MD, {})
+        for chunk in chunks:
+            assert chunk.metadata.get("char_count") == len(chunk.content)
 
 
 class TestEmbeddingClient:

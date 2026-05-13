@@ -5,6 +5,33 @@ from typing import Any
 
 from src.config.settings import settings
 
+# Conservative sentence boundary detector.
+#
+# Splits on end-of-sentence punctuation (.!?) followed by whitespace and the
+# start of a new sentence.  Uses two fixed-width lookbehind alternatives so
+# closing punctuation (quotes, parens) stays attached to the preceding sentence.
+#
+# Lookbehind alternatives (width-2 first, width-1 fallback):
+#   (?<=[.!?]["'"\u2019)])   — punct + closing: straight/curly quote or `)`
+#   (?<=[.!?])               — bare punctuation
+#
+# Lookahead covers common sentence openers:
+#   A-Z, À-Ö, Ø-Ý           — ASCII and Latin-1 uppercase, including all
+#                              Portuguese accented capitals (Á Â Ã Ç É Ê Í …)
+#   0-9                      — digit-led sentences ("2024 brought new rules.")
+#   ( [ " ' " '              — opening bracket or straight/curly quotation mark
+#
+# Known limitation: sentences starting with a lowercase letter (uncommon in
+# formal governance documents) are not detected, deliberately avoiding false
+# splits on abbreviations ("e.g.", "i.e.", "vs.") and decimal numbers.
+_SENTENCE_END_RE = re.compile(
+    "(?:"
+    "(?<=[.!?][\"'\u201d\u2019)])"   # punct + closing: quote (straight/curly) or )
+    "|(?<=[.!?])"                     # bare punct
+    ")\\s+"
+    "(?=[A-ZÀ-ÖØ-Ý0-9(\\[\"'\u201c\u2018])"
+)
+
 
 @dataclass
 class Chunk:
@@ -17,33 +44,223 @@ class Chunk:
         return hashlib.sha256(content.encode()).hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """Split text into paragraphs separated by one or more blank lines."""
+    return [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split a paragraph into individual sentences.
+
+    Uses a conservative boundary that only triggers when sentence-ending
+    punctuation is followed by whitespace and an uppercase letter.  This
+    avoids splitting on common abbreviations (``e.g.``, ``i.e.``, ``vs.``)
+    and decimal numbers.
+    """
+    parts = _SENTENCE_END_RE.split(text)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _char_split(text: str, max_size: int, overlap: int) -> list[str]:
+    """Hard character split — last resort for tokens that individually exceed *max_size*.
+
+    ``overlap`` is clamped to ``max_size - 1`` so the sliding window always
+    advances by at least one character, preventing an infinite loop when the
+    caller passes ``overlap >= max_size``.
+    """
+    overlap = max(0, min(overlap, max_size - 1))
+    parts: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_size, len(text))
+        parts.append(text[start:end])
+        if end >= len(text):
+            break
+        start = end - overlap
+    return parts
+
+
+def _overlap_seed(buffer: list[str], overlap: int) -> list[str]:
+    """Return the tail of *buffer* whose total joined length fits within *overlap* chars."""
+    if overlap <= 0:
+        return []
+    seed: list[str] = []
+    seed_chars = 0
+    for unit in reversed(buffer):
+        # +1 for the space separator added by " ".join when seed is non-empty
+        needed = len(unit) + (1 if seed else 0)
+        if seed_chars + needed > overlap:
+            break
+        seed.insert(0, unit)
+        seed_chars += needed
+    return seed
+
+
+def _build_chunks(
+    units: list[str],
+    max_size: int,
+    overlap: int,
+    metadata: dict[str, Any],
+    chunk_index_start: int = 0,
+) -> list[Chunk]:
+    """Greedily accumulate *units* (sentences / paragraphs) into :class:`Chunk` objects.
+
+    Algorithm
+    ---------
+    * Units are appended to a running buffer until the next unit would push
+      the buffer past *max_size* characters.
+    * When the buffer is full it is emitted as a chunk and a new buffer is
+      seeded with whole units from the tail of the previous buffer (up to
+      *overlap* characters), so every chunk begins at a sentence boundary.
+    * Units that individually exceed *max_size* are hard-split at character
+      boundaries with :func:`_char_split` as a last resort (e.g. long code
+      lines, tables, or pathological inputs like repeated characters).
+
+    ``buffer_chars`` tracks ``len(" ".join(buffer))`` incrementally to avoid
+    an O(n) re-join on every unit iteration (which would give O(n²) overall
+    for paragraphs with many short sentences).
+    """
+    chunks: list[Chunk] = []
+    buffer: list[str] = []
+    buffer_chars: int = 0  # tracks len(" ".join(buffer))
+
+    def _flush() -> None:
+        content = " ".join(buffer).strip()
+        if content:
+            chunks.append(
+                Chunk(
+                    chunk_id=Chunk.make_id(content),
+                    content=content,
+                    metadata={
+                        **metadata,
+                        "chunk_index": chunk_index_start + len(chunks),
+                        "char_count": len(content),
+                    },
+                )
+            )
+
+    def _set_buffer(new_buffer: list[str]) -> None:
+        """Replace buffer and recompute buffer_chars from scratch."""
+        nonlocal buffer, buffer_chars
+        buffer = new_buffer
+        buffer_chars = len(" ".join(buffer))
+
+    for raw_unit in units:
+        unit = raw_unit.strip()
+        if not unit:
+            continue
+
+        unit_len = len(unit)
+
+        # ── Unit is larger than the entire window → flush, then hard-split ──
+        if unit_len > max_size:
+            seed: list[str] = []
+            if buffer:
+                _flush()
+                seed = _overlap_seed(buffer, overlap)
+                _set_buffer([])
+            # Combine the overlap seed with the first hard-split fragment so it
+            # is not emitted as a standalone micro-chunk.  Cap the seed so that
+            # the combined chunk does not exceed max_size.
+            first_part = True
+            for raw_part in _char_split(unit, max_size, overlap):
+                part = raw_part.strip()
+                if not part:
+                    continue
+                if first_part and seed:
+                    max_seed = max(0, max_size - len(part) - 1)
+                    capped_seed = _overlap_seed(seed, min(overlap, max_seed))
+                    _set_buffer(capped_seed + [part])
+                    first_part = False
+                else:
+                    if buffer:
+                        _flush()
+                    _set_buffer([part])
+                    first_part = False
+            continue
+
+        # ── Adding this unit would overflow the buffer → flush first ──
+        if buffer and buffer_chars + 1 + unit_len > max_size:
+            _flush()
+            # Bound the seed so that seed_chars + sep + unit_len <= max_size,
+            # preventing the buffer from exceeding max_size after appending unit.
+            max_seed = max(0, max_size - unit_len - 1)
+            _set_buffer(_overlap_seed(buffer, min(overlap, max_seed)))
+
+        buffer_chars += (1 if buffer else 0) + unit_len
+        buffer.append(unit)
+
+    if buffer:
+        _flush()
+
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
 def chunk_text(
     text: str,
     metadata: dict[str, Any],
     max_size: int | None = None,
     overlap: int | None = None,
 ) -> list[Chunk]:
+    """Paragraph- and sentence-aware text chunking.
+
+    Splitting hierarchy (coarsest → finest):
+
+    1. **Paragraphs** — blank-line-separated blocks are treated as independent
+       units.  Short paragraphs that fit within *max_size* are kept whole.
+    2. **Sentences** — paragraphs whose sentences are accumulated until the
+       buffer reaches *max_size*.  The boundary detector avoids cutting on
+       abbreviations or decimal numbers.
+    3. **Characters** — sentences that individually exceed *max_size* are
+       hard-split as a last resort (e.g. long code lines or tables).
+
+    Overlap is sentence-aware: the new chunk is seeded with whole sentences
+    from the tail of the previous chunk (up to *overlap* characters) so every
+    chunk starts at a sentence boundary.
+
+    The sentence boundary detector recognises:
+
+    * Upper-case ASCII and Latin-1 letters (``A–Z``, ``À–Ö``, ``Ø–Ý``),
+      covering all common Portuguese accented capitals.
+    * Leading digits (e.g. ``"2024 brought new rules."``).
+    * Opening bracket or quotation characters (``(``, ``[``, ``"``, ``'``
+      and their curly-quote Unicode variants).
+
+    **Limitation:** sentences that start with a *lowercase* letter — including
+    accented lowercase letters common in Portuguese (``à``, ``é``, ``ç``, …)
+    and quoted speech like ``"disse ele."`` — are deliberately *not* split from
+    the preceding sentence.  This avoids false breaks on abbreviations
+    (``e.g.``, ``i.e.``) and decimal numbers, but means such sentences may be
+    absorbed into the preceding sentence's chunk or fall through to the
+    character splitter for very long paragraphs.
+
+    Every :class:`Chunk` receives:
+
+    * ``chunk_index`` — zero-based position within this call's result list.
+    * ``char_count``  — character length of the chunk's content.
+    """
     max_size = max_size if max_size is not None else settings.chunk_max_size
     overlap = overlap if overlap is not None else settings.chunk_overlap
     text = text.strip()
     if not text:
         return []
 
-    chunks: list[Chunk] = []
-    start = 0
-    while start < len(text):
-        end = start + max_size
-        content = text[start:end].strip()
-        if content:
-            chunks.append(
-                Chunk(
-                    chunk_id=Chunk.make_id(content),
-                    content=content,
-                    metadata={**metadata, "chunk_index": len(chunks)},
-                )
-            )
-        start = end - overlap if end < len(text) else len(text)
-    return chunks
+    units: list[str] = []
+    for para in _split_paragraphs(text):
+        sentences = _split_sentences(para)
+        units.extend(sentences if sentences else [para])
+
+    return _build_chunks(units, max_size, overlap, metadata)
 
 
 def chunk_markdown(
@@ -52,32 +269,60 @@ def chunk_markdown(
     max_size: int | None = None,
     overlap: int | None = None,
 ) -> list[Chunk]:
-    """Split Markdown text into chunks, preserving section heading hierarchy in metadata."""
+    """Split Markdown into sentence-aware chunks preserving section hierarchy.
+
+    Each ATX-heading section (``#`` … ``######``) is chunked independently
+    using :func:`chunk_text`.  Every chunk receives the following metadata:
+
+    * ``heading_path``  — full breadcrumb list from root to the section's own
+      heading, e.g. ``["Architecture", "Storage", "Qdrant"]``.
+    * ``section_title`` — the most specific heading (last element of
+      ``heading_path``).  Empty string for content that precedes all headings.
+    * ``heading_level`` — ATX depth (1–6) of the section.  ``0`` for content
+      that precedes the first heading.
+    * ``chunk_index``   — position within the section's own chunk list.
+    * ``char_count``    — character length of the chunk's content.
+    """
     max_size = max_size if max_size is not None else settings.chunk_max_size
     overlap = overlap if overlap is not None else settings.chunk_overlap
 
     heading_re = re.compile(r"^(#{1,6})\s+(.+)", re.MULTILINE)
 
-    sections: list[tuple[list[str], str]] = []  # (heading_path, body)
+    # Each entry: (heading_path, heading_level, body_text)
+    sections: list[tuple[list[str], int, str]] = []
     heading_stack: list[str] = []
+    last_level = 0
     last_pos = 0
 
     for match in heading_re.finditer(text):
         body = text[last_pos : match.start()].strip()
         if body:
-            sections.append((list(heading_stack), body))
+            sections.append((list(heading_stack), last_level, body))
         level = len(match.group(1))
         heading_stack = heading_stack[: level - 1] + [match.group(2).strip()]
+        last_level = level
         last_pos = match.end()
 
     tail = text[last_pos:].strip()
     if tail:
-        sections.append((list(heading_stack), tail))
+        sections.append((list(heading_stack), last_level, tail))
 
     chunks: list[Chunk] = []
-    for heading_path, body in sections:
-        section_meta = {**metadata, "heading_path": heading_path}
+    for heading_path, heading_level, body in sections:
+        section_meta: dict[str, Any] = {
+            **metadata,
+            "heading_path": heading_path,
+            "section_title": heading_path[-1] if heading_path else "",
+            "heading_level": heading_level,
+        }
         for chunk in chunk_text(body, section_meta, max_size, overlap):
-            chunk.metadata["heading_path"] = heading_path
+            # Reinforce heading keys — chunk_text injects chunk_index / char_count
+            # into metadata but must not clobber the heading fields.
+            # Use list() copies so that downstream mutations of
+            # chunk.metadata["heading_path"] do not affect other chunks.
+            chunk.metadata["heading_path"] = list(heading_path)
+            chunk.metadata["section_title"] = heading_path[-1] if heading_path else ""
+            chunk.metadata["heading_level"] = heading_level
             chunks.append(chunk)
+
     return chunks
